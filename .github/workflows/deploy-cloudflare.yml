@@ -234,23 +234,28 @@ jobs:
       - name: ♻️ Initialize database
         run: |
           set +e
-          echo "🛠️ Starting database initialization (diagnostics v2)..."
+          echo "🛠️ Diagnostics v3..."
           WORKER_URL="${{ steps.deploy.outputs.worker_url }}"
-                    echo "Worker host: $(echo "$WORKER_URL" | sed 's|https://||')"
+          echo "===== GENERATED CONFIG (secret masked) ====="
+          sed 's|jwt_secret = ".*"|jwt_secret = "***"|' mail-worker/wrangler-action.toml
           cd mail-worker
-          (timeout 120 pnpm wrangler tail cloud-mail --format pretty > ../tail.log 2>&1 &)
+          (timeout 150 pnpm wrangler tail cloud-mail --format json > ../tail.log 2>&1 &)
           cd ..
           sleep 12
+          echo "===== ROOT PAGE ====="
+          curl -s -o /dev/null -w "root HTTP: %{http_code}\n" "$WORKER_URL/"
+          echo "===== PUBLIC CONFIG ENDPOINT ====="
+          curl -s -w "\nHTTP: %{http_code}\n" "$WORKER_URL/api/setting/websiteConfig" | head -c 600
+          echo ""
+          echo "===== INIT CALL ====="
           HTTP_CODE=$(curl -sL -w "%{http_code}" -o response.txt "$WORKER_URL/api/init/${JWT_SECRET}")
-                    CURL_EXIT=$?
           RESPONSE_BODY=$(cat response.txt)
-          echo "Init result -> curl_exit: $CURL_EXIT, HTTP: $HTTP_CODE, Response: $RESPONSE_BODY"
+          echo "Init result -> HTTP: $HTTP_CODE, Response: $RESPONSE_BODY"
+          echo "===== D1 VIA WRANGLER ====="
+          cd mail-worker
+          pnpm wrangler d1 execute cloud-mail --remote --command "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name" 2>&1 | tail -30
+          cd ..
           sleep 6
-          echo "===== D1 DATABASES ====="
-          curl -s "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database" -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" | jq -r '.result[] | .name + " " + .uuid'
-          DB_ID=$(curl -s "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database" -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" | jq -r '.result[] | select(.name=="cloud-mail") | .uuid' | head -1)
-          echo "===== D1 TABLES in $DB_ID ====="
-          curl -s -X POST "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/$DB_ID/query" -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H "Content-Type: application/json" --data "{\"sql\":\"SELECT name FROM sqlite_master WHERE type='table' ORDER BY name\"}" | jq -r '.result[0].results[]?.name'
           echo "===== WORKER TAIL LOG ====="
           cat tail.log
           if [ "$RESPONSE_BODY" = "success" ]; then
