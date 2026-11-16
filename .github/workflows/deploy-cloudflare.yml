@@ -110,9 +110,9 @@ jobs:
           if [ -n "$EMAIL" ]; then
             cat >> "$CONFIG_FILE" <<'EOF'
 
-            [[send_email]]
-            name = "email"
-            EOF
+          [[send_email]]
+          name = "email"
+          EOF
           fi
 
           sed -i "s|\${NAME}|${NAME}|g" "$CONFIG_FILE"
