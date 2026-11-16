@@ -234,30 +234,54 @@ jobs:
       - name: ♻️ Initialize database
         run: |
           set +e
-          echo "🛠️ Diagnostics v3..."
+          echo "🛠️ Probe v4: binding bisection..."
+          WR="$PWD/mail-worker/node_modules/.bin/wrangler"
+          mkdir -p probe
+          cat > probe/index.js <<'EOF'
+          export default { async fetch(req, env) { return new Response('probe ok', { status: 200 }) } }
+          EOF
+          probe_test() {
+            echo "===== PROBE: $1 ====="
+            (cd probe && "$WR" deploy 2>&1 | tail -4)
+            sleep 4
+            curl -s -w "\nprobe HTTP: %{http_code}\n" --max-time 20 "https://harbor-probe.tanhamanam.workers.dev/" | head -c 300
+            echo ""
+          }
+          cat > probe/wrangler.toml <<'EOF'
+          name = "harbor-probe"
+          main = "index.js"
+          compatibility_date = "2025-06-04"
+          EOF
+          probe_test "base, no bindings"
+          cat >> probe/wrangler.toml <<'EOF'
+          [[kv_namespaces]]
+          binding = "kv"
+          id = "2caff254c700439ba3ad93d73afafd7d"
+          EOF
+          probe_test "plus KV"
+          cat >> probe/wrangler.toml <<'EOF'
+          [[d1_databases]]
+          binding = "db"
+          database_name = "cloud-mail"
+          database_id = "9320c655-48ef-4c29-9efc-585d14bfc20b"
+          EOF
+          probe_test "plus KV+D1"
+          cat >> probe/wrangler.toml <<'EOF'
+          [ai]
+          binding = "ai"
+          EOF
+          probe_test "plus KV+D1+AI"
+          cat >> probe/wrangler.toml <<'EOF'
+          [[send_email]]
+          name = "forward"
+          EOF
+          probe_test "plus KV+D1+AI+send_email"
+          (cd probe && "$WR" delete --name harbor-probe --force 2>&1 | tail -2)
+          echo "===== INIT RETRY ====="
           WORKER_URL="${{ steps.deploy.outputs.worker_url }}"
-          echo "===== GENERATED CONFIG (secret masked) ====="
-          sed 's|jwt_secret = ".*"|jwt_secret = "***"|' mail-worker/wrangler-action.toml
-          cd mail-worker
-          (timeout 150 pnpm wrangler tail cloud-mail --format json > ../tail.log 2>&1 &)
-          cd ..
-          sleep 12
-          echo "===== ROOT PAGE ====="
-          curl -s -o /dev/null -w "root HTTP: %{http_code}\n" "$WORKER_URL/"
-          echo "===== PUBLIC CONFIG ENDPOINT ====="
-          curl -s -w "\nHTTP: %{http_code}\n" "$WORKER_URL/api/setting/websiteConfig" | head -c 600
-          echo ""
-          echo "===== INIT CALL ====="
           HTTP_CODE=$(curl -sL -w "%{http_code}" -o response.txt "$WORKER_URL/api/init/${JWT_SECRET}")
           RESPONSE_BODY=$(cat response.txt)
           echo "Init result -> HTTP: $HTTP_CODE, Response: $RESPONSE_BODY"
-          echo "===== D1 VIA WRANGLER ====="
-          cd mail-worker
-          pnpm wrangler d1 execute cloud-mail --remote --command "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name" 2>&1 | tail -30
-          cd ..
-          sleep 6
-          echo "===== WORKER TAIL LOG ====="
-          cat tail.log
           if [ "$RESPONSE_BODY" = "success" ]; then
             echo "✅ Setup completed."
           else
