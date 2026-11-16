@@ -234,48 +234,29 @@ jobs:
       - name: ♻️ Initialize database
         run: |
           set +e
-          echo "🛠️ Probe v4: binding bisection..."
+          echo "🛠️ Probe v5: custom domain test..."
           WR="$PWD/mail-worker/node_modules/.bin/wrangler"
           mkdir -p probe
           cat > probe/index.js <<'EOF'
           export default { async fetch(req, env) { return new Response('probe ok', { status: 200 }) } }
           EOF
-          probe_test() {
-            echo "===== PROBE: $1 ====="
-            (cd probe && "$WR" deploy 2>&1 | tail -4)
-            sleep 4
-            curl -s -w "\nprobe HTTP: %{http_code}\n" --max-time 20 "https://harbor-probe.tanhamanam.workers.dev/" | head -c 300
-            echo ""
-          }
+          echo "===== OLD WORKER CHECK ====="
+          curl -s -w "\nold worker HTTP: %{http_code}\n" --max-time 20 "https://arsan-tv-8a2c.tanhamanam.workers.dev/" | head -c 300
+          echo ""
           cat > probe/wrangler.toml <<'EOF'
           name = "harbor-probe"
-          main = "index.js"
+            main = "index.js"
           compatibility_date = "2025-06-04"
+          [[routes]]
+          pattern = "probe.arsalan8797.eu.cc"
+          custom_domain = true
           EOF
-          probe_test "base, no bindings"
-          cat >> probe/wrangler.toml <<'EOF'
-          [[kv_namespaces]]
-          binding = "kv"
-          id = "2caff254c700439ba3ad93d73afafd7d"
-          EOF
-          probe_test "plus KV"
-          cat >> probe/wrangler.toml <<'EOF'
-          [[d1_databases]]
-          binding = "db"
-          database_name = "cloud-mail"
-          database_id = "9320c655-48ef-4c29-9efc-585d14bfc20b"
-          EOF
-          probe_test "plus KV+D1"
-          cat >> probe/wrangler.toml <<'EOF'
-          [ai]
-          binding = "ai"
-          EOF
-          probe_test "plus KV+D1+AI"
-          cat >> probe/wrangler.toml <<'EOF'
-          [[send_email]]
-          name = "forward"
-          EOF
-          probe_test "plus KV+D1+AI+send_email"
+          echo "===== PROBE CUSTOM DOMAIN DEPLOY ====="
+          (cd probe && "$WR" deploy 2>&1 | tail -8)
+          sleep 20
+          echo "===== PROBE CUSTOM DOMAIN FETCH ====="
+          curl -s -w "\nprobe custom HTTP: %{http_code}\n" --max-time 25 "https://probe.arsalan8797.eu.cc/" | head -c 300
+          echo ""
           (cd probe && "$WR" delete --name harbor-probe --force 2>&1 | tail -2)
           echo "===== INIT RETRY ====="
           WORKER_URL="${{ steps.deploy.outputs.worker_url }}"
