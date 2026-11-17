@@ -1,0 +1,4 @@
+name = "iptv-list"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+routes = [ { pattern = "iptv.saqqezcity.dpdns.org", custom_domain = true } ]
